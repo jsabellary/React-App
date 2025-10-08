@@ -1,7 +1,7 @@
 name: Deploy Server to Elastic Beanstalk
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -10,9 +10,22 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: eb-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    # expose secrets as env so we can use them in `if:` safely
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EB_APP: ${{ secrets.EB_APP }}
+      EB_ENV: ${{ secrets.EB_ENV }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
     steps:
       - name: Checkout code
@@ -28,10 +41,10 @@ jobs:
 
       - name: Publish .NET app
         run: |
-          dotnet publish FlightFinder.Server/FlightFinder.Server.csproj \
-            -c Release \
-            -r linux-x64 \
-            --self-contained false \
+          dotnet publish FlightFinder.Server/FlightFinder.Server.csproj `
+            -c Release `
+            -r linux-x64 `
+            --self-contained false `
             -o publish
 
       - name: Create deployment package
@@ -40,20 +53,22 @@ jobs:
           zip -r ../deployment.zip .
           cd ..
 
+      # OIDC path if you provided a role
       - name: Configure AWS credentials (OIDC)
-        if: ${{ secrets.AWS_ROLE_ARN != '' }}
+        if: ${{ env.AWS_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
+      # Fallback to access keys if no role
       - name: Configure AWS credentials (Access Keys)
-        if: ${{ secrets.AWS_ROLE_ARN == '' }}
+        if: ${{ env.AWS_ROLE_ARN == '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Generate deployment label
         id: version
@@ -61,25 +76,25 @@ jobs:
 
       - name: Upload to S3
         run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           aws s3 cp deployment.zip \
-            s3://elasticbeanstalk-${{ secrets.AWS_REGION }}-$(aws sts get-caller-identity --query Account --output text)/${{ secrets.EB_APP }}/${{ steps.version.outputs.label }}.zip
+            s3://elasticbeanstalk-${AWS_REGION}-${ACCOUNT_ID}/${EB_APP}/${{ steps.version.outputs.label }}.zip
 
       - name: Create application version
         run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           aws elasticbeanstalk create-application-version \
-            --application-name ${{ secrets.EB_APP }} \
-            --version-label ${{ steps.version.outputs.label }} \
-            --source-bundle S3Bucket=elasticbeanstalk-${{ secrets.AWS_REGION }}-$(aws sts get-caller-identity --query Account --output text),S3Key=${{ secrets.EB_APP }}/${{ steps.version.outputs.label }}.zip
+            --application-name "${EB_APP}" \
+            --version-label "${{ steps.version.outputs.label }}" \
+            --source-bundle S3Bucket=elasticbeanstalk-${AWS_REGION}-${ACCOUNT_ID},S3Key=${EB_APP}/${{ steps.version.outputs.label }}.zip
 
       - name: Deploy to Elastic Beanstalk
         run: |
           aws elasticbeanstalk update-environment \
-            --application-name ${{ secrets.EB_APP }} \
-            --environment-name ${{ secrets.EB_ENV }} \
-            --version-label ${{ steps.version.outputs.label }}
+            --environment-name "${EB_ENV}" \
+            --version-label "${{ steps.version.outputs.label }}"
 
       - name: Wait for deployment
         run: |
           aws elasticbeanstalk wait environment-updated \
-            --application-name ${{ secrets.EB_APP }} \
-            --environment-name ${{ secrets.EB_ENV }}
+            --environment-names "${EB_ENV}"

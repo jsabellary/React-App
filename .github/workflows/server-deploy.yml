@@ -39,13 +39,13 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore FlightFinder.Server/FlightFinder.Server.csproj
 
-      - name: Publish .NET app
-        run: |
-          dotnet publish FlightFinder.Server/FlightFinder.Server.csproj `
-            -c Release `
-            -r linux-x64 `
-            --self-contained false `
-            -o publish
+    - name: Publish .NET app
+      run: |
+        dotnet publish FlightFinder.Server/FlightFinder.Server.csproj \
+          -c Release \
+          -r linux-x64 \
+          --self-contained false \
+          -o publish
 
       - name: Create deployment package
         run: |

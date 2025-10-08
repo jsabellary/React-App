@@ -34,6 +34,10 @@ Deploy (AWS free tier friendly)
 
 ## AWS Deployment Setup
 
+📚 **For detailed step-by-step instructions, see:**
+- [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Complete deployment guide with screenshots
+- [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) - Quick reference checklist
+
 ### Plan (Free-Tier Friendly)
 - **Frontend (React)**: S3 static website + CloudFront (Free Tier)
 - **Backend (ASP.NET Core)**: Elastic Beanstalk single-instance (t2.micro or t4g.micro, Free Tier)

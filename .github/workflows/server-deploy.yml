@@ -49,6 +49,8 @@ jobs:
 
       - name: Create deployment package
         run: |
+          cp Procfile publish/
+          cp -r .ebextensions publish/
           cd publish
           zip -r ../deployment.zip .
           cd ..

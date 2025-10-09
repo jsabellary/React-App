@@ -1,4 +1,46 @@
-# Deployment Configuration Complete ✅
+# 🚀 Deployment Configuration Complete ✅
+
+## Quick Start - What You Need to Do NOW
+
+### STEP 1: Configure GitHub Secrets ⚙️
+
+**Go to:** `https://github.com/jsabellary/FlightFinderReact/settings/secrets/actions`
+
+Add these secrets (click "New repository secret" for each):
+
+**Essential Secrets:**
+1. `AWS_REGION` = `us-east-1` (or your AWS region)
+2. `EB_APP` = `FlightFinderReact` (your Elastic Beanstalk app name)
+3. `EB_ENV` = `flightfinderreact-env` (your EB environment name)
+
+**Authentication (choose ONE method):**
+- **Option A (Recommended): OIDC**
+  - `AWS_ROLE_ARN` = `arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_ROLE_NAME`
+- **Option B: Access Keys**
+  - `AWS_ACCESS_KEY_ID` = (your access key)
+  - `AWS_SECRET_ACCESS_KEY` = (your secret key)
+
+### STEP 2: Deploy 🚀
+
+**Push to main branch OR manually trigger workflow:**
+
+```bash
+# Option A: Merge to main and push
+git checkout main
+git merge copilot/deploy-server-using-yml
+git push origin main
+```
+
+OR
+
+**Option B: Manually trigger from GitHub Actions tab**
+- Go to Actions → "Deploy Server to Elastic Beanstalk" → Run workflow
+
+### STEP 3: Monitor 👀
+
+Watch the workflow in the Actions tab. If configured correctly, deployment takes ~5-10 minutes.
+
+---
 
 ## What Was Fixed
 

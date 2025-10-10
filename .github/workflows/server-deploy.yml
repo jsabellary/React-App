@@ -28,6 +28,26 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
     steps:
+      - name: Validate required secrets
+        run: |
+          if [ -z "$AWS_REGION" ]; then
+            echo "❌ Error: AWS_REGION secret is not set"
+            exit 1
+          fi
+          if [ -z "$EB_APP" ]; then
+            echo "❌ Error: EB_APP secret is not set"
+            exit 1
+          fi
+          if [ -z "$EB_ENV" ]; then
+            echo "❌ Error: EB_ENV secret is not set"
+            exit 1
+          fi
+          if [ -z "$AWS_ROLE_ARN" ] && ([ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]); then
+            echo "❌ Error: Either AWS_ROLE_ARN or both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -49,6 +69,8 @@ jobs:
 
       - name: Create deployment package
         run: |
+          cp Procfile publish/
+          cp -r .ebextensions publish/
           cd publish
           zip -r ../deployment.zip .
           cd ..
@@ -98,3 +120,15 @@ jobs:
         run: |
           aws elasticbeanstalk wait environment-updated \
             --environment-names "${EB_ENV}"
+
+      - name: Display deployment info
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV}" \
+            --query 'Environments[0].CNAME' \
+            --output text)
+          echo "🌐 Application URL: http://${ENV_URL}"
+          echo "📋 Version deployed: ${{ steps.version.outputs.label }}"
+          echo "🔍 Test the API: curl http://${ENV_URL}/api/airports"

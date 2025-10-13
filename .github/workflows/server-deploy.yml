@@ -1,0 +1,134 @@
+name: Deploy Server to Elastic Beanstalk
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: eb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # expose secrets as env so we can use them in `if:` safely
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EB_APP: ${{ secrets.EB_APP }}
+      EB_ENV: ${{ secrets.EB_ENV }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Validate required secrets
+        run: |
+          if [ -z "$AWS_REGION" ]; then
+            echo "❌ Error: AWS_REGION secret is not set"
+            exit 1
+          fi
+          if [ -z "$EB_APP" ]; then
+            echo "❌ Error: EB_APP secret is not set"
+            exit 1
+          fi
+          if [ -z "$EB_ENV" ]; then
+            echo "❌ Error: EB_ENV secret is not set"
+            exit 1
+          fi
+          if [ -z "$AWS_ROLE_ARN" ] && ([ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]); then
+            echo "❌ Error: Either AWS_ROLE_ARN or both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore FlightFinder.Server/FlightFinder.Server.csproj
+
+      - name: Publish .NET app
+        run: |
+          dotnet publish FlightFinder.Server/FlightFinder.Server.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained false \
+            -o publish
+
+      - name: Create deployment package
+        run: |
+          cp Procfile publish/
+          cp -r .ebextensions publish/
+          cd publish
+          zip -r ../deployment.zip .
+          cd ..
+
+      # OIDC path if you provided a role
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ env.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Fallback to access keys if no role
+      - name: Configure AWS credentials (Access Keys)
+        if: ${{ env.AWS_ROLE_ARN == '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate deployment label
+        id: version
+        run: echo "label=app-${{ github.sha }}-$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Upload to S3
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws s3 cp deployment.zip \
+            s3://elasticbeanstalk-${AWS_REGION}-${ACCOUNT_ID}/${EB_APP}/${{ steps.version.outputs.label }}.zip
+
+      - name: Create application version
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws elasticbeanstalk create-application-version \
+            --application-name "${EB_APP}" \
+            --version-label "${{ steps.version.outputs.label }}" \
+            --source-bundle S3Bucket=elasticbeanstalk-${AWS_REGION}-${ACCOUNT_ID},S3Key=${EB_APP}/${{ steps.version.outputs.label }}.zip
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          aws elasticbeanstalk update-environment \
+            --environment-name "${EB_ENV}" \
+            --version-label "${{ steps.version.outputs.label }}"
+
+      - name: Wait for deployment
+        run: |
+          aws elasticbeanstalk wait environment-updated \
+            --environment-names "${EB_ENV}"
+
+      - name: Display deployment info
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV}" \
+            --query 'Environments[0].CNAME' \
+            --output text)
+          echo "🌐 Application URL: http://${ENV_URL}"
+          echo "📋 Version deployed: ${{ steps.version.outputs.label }}"
+          echo "🔍 Test the API: curl http://${ENV_URL}/api/airports"
